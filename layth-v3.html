@@ -1,232 +1,241 @@
-<!DOCTYPE html><html lang="ar" dir="rtl">
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<title>LAYTH PRO MAX FINAL</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>نظام الليث - النسخة الاحترافية النهائية</title>
-<link href="https://fonts.googleapis.com/css2?family=Cairo&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
-body{margin:0;font-family:'Cairo',sans-serif;background:#0b1220;color:#fff;display:flex}
-.sidebar{width:240px;background:#0f172a;height:100vh;position:fixed;right:0;padding:12px;overflow:auto}
-.sidebar h2{text-align:center;margin:10px 0}
-.menu button{width:100%;margin:5px 0;padding:10px;border:0;border-radius:10px;background:#1f2937;color:#fff;cursor:pointer}
-.menu button:hover{background:#374151}
-.content{margin-right:240px;padding:15px;width:100%}
-.section{display:none}
-.active{display:block}
-.card{background:#111827;padding:12px;margin:10px 0;border-radius:12px}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.big{font-size:20px}
-input,select{width:100%;padding:8px;margin:5px 0;border-radius:8px;border:0}
-.badge{background:#334155;padding:4px 8px;border-radius:8px}
-.toast{position:fixed;bottom:20px;left:20px;background:#16a34a;padding:10px;border-radius:10px;display:none}
+body{font-family:Arial;background:#0f172a;color:#fff;padding:15px}
+input,button,select{padding:10px;border-radius:8px;border:none;margin:5px}
+button{cursor:pointer;background:#22c55e;color:#000;font-weight:bold}
+.card{background:#1e293b;padding:12px;margin-top:10px;border-radius:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+h3{margin-top:20px}
 </style>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, getDocs,
+  deleteDoc, doc, updateDoc, setDoc, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+import {
+  getAuth, GoogleAuthProvider,
+  signInWithPopup, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+// 🔥 Firebase Config (تبعك)
+const firebaseConfig = {
+  apiKey: "...",
+  authDomain: "layt2h-system.firebaseapp.com",
+  projectId: "layt2h-system"
+};
+
+// INIT
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+let user=null;
+
+// ================= STATE =================
+let state={
+  stock:[],
+  bills:[],
+  cash:0
+};
+
+// ================= AUTH =================
+window.login = async()=>{
+  const res = await signInWithPopup(auth, provider);
+  user = res.user;
+};
+
+onAuthStateChanged(auth,(u)=>{
+  user=u;
+  if(u){
+    loadAll();
+    listenCash();
+  }
+});
+
+// ================= DB =================
+const col = (name)=>collection(db,"users",user.uid,name);
+const systemRef = ()=>doc(db,"users",user.uid,"system","main");
+
+// ================= LOAD =================
+async function loadAll(){
+  await Promise.all([
+    load("stock"),
+    load("bills")
+  ]);
+  render();
+}
+
+async function load(name){
+  const snap = await getDocs(col(name));
+  state[name]=snap.docs.map(d=>({id:d.id,...d.data()}));
+}
+
+// ================= CASH REALTIME =================
+function listenCash(){
+  onSnapshot(systemRef(), (docSnap)=>{
+    if(docSnap.exists()){
+      state.cash = docSnap.data().cash || 0;
+      render();
+    }
+  });
+}
+
+// ================= STOCK =================
+window.addStock = async()=>{
+  const name = stockName.value;
+  const qty = Number(stockQty.value);
+  const cost = Number(stockCost.value);
+  const price = Number(stockPrice.value);
+
+  if(!name) return alert("❌ ناقص");
+
+  await addDoc(col("stock"),{name,qty,cost,price});
+  load("stock").then(render);
+};
+
+// ================= CART =================
+let cart=[];
+
+window.addToCart = ()=>{
+  const id = stockSelect.value;
+  const item = state.stock.find(i=>i.id===id);
+
+  if(!item || item.qty<=0) return alert("❌ نفذ");
+
+  cart.push({...item, qtyBuy:1});
+  renderCart();
+};
+
+function renderCart(){
+  cartBox.innerHTML="";
+  cart.forEach((i,idx)=>{
+    cartBox.innerHTML+=`
+      <div class="card">
+        ${i.name} - ${i.price}
+        <button onclick="removeItem(${idx})">❌</button>
+      </div>
+    `;
+  });
+}
+
+window.removeItem = (i)=>{
+  cart.splice(i,1);
+  renderCart();
+};
+
+// ================= SAVE BILL =================
+window.saveBill = async()=>{
+  if(cart.length===0) return alert("❌ فاضي");
+
+  let total=0;
+  let profit=0;
+
+  for(const i of cart){
+    total += i.price * i.qtyBuy;
+    profit += (i.price - i.cost) * i.qtyBuy;
+
+    await updateDoc(doc(db,"users",user.uid,"stock",i.id),{
+      qty: i.qty - i.qtyBuy
+    });
+  }
+
+  await addDoc(col("bills"),{
+    items: cart,
+    total,
+    profit,
+    date: new Date().toISOString()
+  });
+
+  state.cash += total;
+  await setDoc(systemRef(), {cash: state.cash});
+
+  cart=[];
+  loadAll();
+};
+
+// ================= DASH =================
+function calc(){
+  const sales = state.bills.reduce((a,b)=>a+b.total,0);
+  const profit = state.bills.reduce((a,b)=>a+b.profit,0);
+  return {sales,profit};
+}
+
+// ================= UI =================
+function render(){
+  const d = calc();
+
+  dash.innerHTML=`
+    💰 المبيعات: ${d.sales}<br>
+    🧠 الربح: ${d.profit}<br>
+    💵 الصندوق: ${state.cash}
+  `;
+
+  stockSelect.innerHTML="";
+  state.stock.forEach(s=>{
+    stockSelect.innerHTML+=`
+      <option value="${s.id}">
+        ${s.name} (${s.qty})
+      </option>`;
+  });
+
+  billsBox.innerHTML="";
+  state.bills.forEach(b=>{
+    billsBox.innerHTML+=`
+      <div class="card">
+        💰 ${b.total} | 🧠 ${b.profit}
+      </div>`;
+  });
+}
+
+</script>
 </head>
-<body><div class="sidebar">
-<h2>🦁 الليث</h2>
-<div class="menu">
-<button onclick="nav('dash')">📊 داشبورد</button>
-<button onclick="nav('ops')">⚙ العمليات</button>
-<button onclick="nav('inv')">📦 المخزون</button>
-<button onclick="nav('cust')">👤 الزبائن</button>
-<button onclick="nav('debts')">💸 الديون</button>
-<button onclick="nav('exp')">💰 المصاريف</button>
-<button onclick="nav('rep')">📈 التقارير</button>
-<button onclick="nav('set')">⚙ النسخ الاحتياطي</button>
-</div>
-</div><div class="content"><!-- DASHBOARD --><div id="dash" class="section active">
-<h2>📊 الداشبورد</h2>
+
+<body>
+
+<h2>🔥 نظام الليث PRO MAX FINAL</h2>
+
+<button onclick="login()">تسجيل دخول Google</button>
+
+<h3>📊 Dashboard</h3>
+<div id="dash"></div>
+
+<hr>
+
 <div class="grid">
-<div class="card">💰 الصندوق<br><span id="balance" class="big">0</span></div>
-<div class="card">📈 الربح<br><span id="profit" class="big">0</span></div>
-<div class="card">📦 رأس المال<br><span id="capital" class="big">0</span></div>
-<div class="card">⚡ العمليات<br><span id="ops" class="big">0</span></div>
+
+<div>
+<h3>📦 مخزون</h3>
+<input id="stockName" placeholder="اسم">
+<input id="stockQty" type="number" placeholder="كمية">
+<input id="stockCost" type="number" placeholder="تكلفة">
+<input id="stockPrice" type="number" placeholder="سعر بيع">
+<button onclick="addStock()">إضافة</button>
 </div>
-<canvas id="chart"></canvas>
-</div><!-- OPS --><div id="ops" class="section">
-<h2>⚙ العمليات</h2>
-<div class="card">
-<select id="type">
-<option>بضاعة</option>
-<option>فاتورة</option>
-<option>شام كاش</option>
-<option>رصيد</option>
-</select>
-<input id="amount" placeholder="المبلغ">
-<input id="cost" placeholder="التكلفة">
-<input id="customer" placeholder="اسم الزبون (اختياري)">
-<button onclick="addOp()">إضافة</button>
+
+<div>
+<h3>🧾 فاتورة</h3>
+<select id="stockSelect"></select>
+<button onclick="addToCart()">➕</button>
+
+<div id="cartBox"></div>
+
+<button onclick="saveBill()">💾 حفظ الفاتورة</button>
 </div>
-<div id="opList"></div>
-</div><!-- INVENTORY (placeholder advanced) --><div id="inv" class="section">
-<h2>📦 المخزون</h2>
-<div class="card">سيتم ربط المخزون بالعمليات بشكل كامل (جاهز للترقية التالية)</div>
-</div><!-- CUSTOMERS --><div id="cust" class="section">
-<h2>👤 الزبائن (CRM)</h2>
-<div class="card">
-<input id="cname" placeholder="الاسم">
-<input id="cmobile" placeholder="الموبايل">
-<button onclick="addCustomer()">إضافة</button>
+
 </div>
-<div id="custList"></div>
-</div><!-- DEBTS --><div id="debts" class="section">
-<h2>💸 الديون</h2>
-<div class="card">
-<input id="dname" placeholder="الاسم">
-<input id="damount" placeholder="المبلغ">
-<button onclick="addDebt()">إضافة</button>
-</div>
-<div id="debtList"></div>
-</div><!-- EXPENSES --><div id="exp" class="section">
-<h2>💰 المصاريف</h2>
-<div class="card">
-<input id="expName" placeholder="النوع">
-<input id="expAmount" placeholder="المبلغ">
-<button onclick="addExp()">إضافة</button>
-</div>
-<div id="expList"></div>
-</div><!-- REPORT --><div id="rep" class="section">
-<h2>📈 التقارير</h2>
-<div id="report"></div>
-<button onclick="printReport()">🖨 طباعة التقرير</button>
-</div><!-- BACKUP --><div id="set" class="section">
-<h2>⚙ النسخ الاحتياطي</h2>
-<div class="card">
-<button onclick="backup()">📤 تصدير نسخة</button>
-<input type="file" onchange="restore(event)">
-</div>
-</div></div><div class="toast" id="toast">تم</div><script>
-let db;
-let chartInstance;
 
-function toast(msg){
- const t=document.getElementById('toast');
- t.innerText=msg;
- t.style.display='block';
- setTimeout(()=>t.style.display='none',2000);
-}
+<h3>📄 الفواتير</h3>
+<div id="billsBox"></div>
 
-function nav(id){
- document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
- document.getElementById(id).classList.add('active');
- loadAll();
-}
-
-function initDB(){
- const req=indexedDB.open("laythDB",10);
- req.onupgradeneeded=e=>{
-  db=e.target.result;
-  ['cash','operations','customers','debts','expenses'].forEach(s=>{
-   if(!db.objectStoreNames.contains(s)) db.createObjectStore(s,{keyPath:'id',autoIncrement:true});
-  });
- };
- req.onsuccess=e=>{db=e.target.result;loadAll();};
-}
-
-function loadAll(){loadDash();loadOps();}
-
-function loadDash(){
- const tx=db.transaction(['cash','operations'],'readonly');
- tx.objectStore('cash').get(1).onsuccess=e=>{
-  let c=e.target.result||{balance:0,capital:0,profit:0};
-  balance.innerText=c.balance;
-  capital.innerText=c.capital;
-  profit.innerText=c.profit;
- };
-
- let count=0;
- let data={};
- tx.objectStore('operations').openCursor().onsuccess=e=>{
-  const cur=e.target.result;
-  if(cur){
-   count++;
-   let d=new Date(cur.value.date).toLocaleDateString();
-   data[d]=(data[d]||0)+cur.value.profit;
-   cur.continue();
-  }else{
-   ops.innerText=count;
-   draw(data);
-  }
- };
-}
-
-function addOp(){
- let a=+amount.value;
- let cst=+cost.value||0;
- let t=type.value;
- if(!a) return toast('أدخل مبلغ');
-
- let op={type:t,amount:a,cost:cst,profit:a-cst,date:new Date()};
-
- let tx=db.transaction(['operations','cash'],'readwrite');
- tx.objectStore('operations').add(op);
-
- tx.objectStore('cash').get(1).onsuccess=e=>{
-  let c=e.target.result||{balance:0,capital:0,profit:0};
-  c.balance+=a;
-  c.capital+=cst;
-  c.profit+=a-cst;
-  tx.objectStore('cash').put({id:1,...c});
- };
-
- toast('تمت العملية');
- loadOps();
-}
-
-function loadOps(){
- opList.innerHTML="";
- let tx=db.transaction('operations');
- tx.objectStore('operations').openCursor().onsuccess=e=>{
-  let c=e.target.result;
-  if(c){
-   opList.innerHTML+=`<div class='card'>${c.value.type} - ${c.value.amount} (ربح ${c.value.profit})</div>`;
-   c.continue();
-  }
- };
-}
-
-function addCustomer(){custList.innerHTML+=`<div class='card'>${cname.value} - ${cmobile.value}</div>`;toast('تم إضافة زبون');}
-function addDebt(){debtList.innerHTML+=`<div class='card'>${dname.value} - ${damount.value}</div>`;toast('تم إضافة دين');}
-function addExp(){expList.innerHTML+=`<div class='card'>${expName.value} - ${expAmount.value}</div>`;toast('تم إضافة مصروف');}
-
-function draw(data){
- if(chartInstance) chartInstance.destroy();
- chartInstance=new Chart(chart,{type:'line',data:{labels:Object.keys(data),datasets:[{label:'ربح',data:Object.values(data)}]}});
-
- let total=0;
- Object.values(data).forEach(v=>total+=v);
- report.innerHTML=`<div class='card'>صافي الربح: ${total}</div>`;
-}
-
-function printReport(){window.print();}
-
-function backup(){
- let data={};
- ['cash','operations','customers','debts','expenses'].forEach(s=>{
-  db.transaction(s).objectStore(s).getAll().onsuccess=e=>data[s]=e.target.result;
- });
- setTimeout(()=>{
-  let b=new Blob([JSON.stringify(data)],{type:'application/json'});
-  let a=document.createElement('a');
-  a.href=URL.createObjectURL(b);
-  a.download='layth-backup.json';
-  a.click();
- },600);
-}
-
-function restore(e){
- let r=new FileReader();
- r.onload=()=>{
-  let d=JSON.parse(r.result);
-  Object.keys(d).forEach(s=>{
-   let tx=db.transaction(s,'readwrite');
-   d[s].forEach(i=>tx.objectStore(s).put(i));
-  });
-  toast('تم الاسترجاع');
- };
- r.readAsText(e.target.files[0]);
-}
-
-initDB();
-</script></body>
+</body>
 </html>
