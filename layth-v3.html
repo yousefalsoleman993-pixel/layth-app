@@ -2,23 +2,24 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>LAYTH PRO MAX FINAL</title>
+<title>LAYTH PRO APP</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
 body{font-family:Arial;background:#0f172a;color:#fff;padding:15px}
-input,button,select{padding:10px;border-radius:8px;border:none;margin:5px}
-button{cursor:pointer;background:#22c55e;color:#000;font-weight:bold}
-.card{background:#1e293b;padding:12px;margin-top:10px;border-radius:10px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-h3{margin-top:20px}
+button,input,select{padding:10px;border-radius:8px;border:none;margin:5px}
+button{background:#22c55e;color:#000;font-weight:bold;cursor:pointer}
+.tab{display:none}
+.active{display:block}
+.card{background:#1e293b;padding:10px;border-radius:10px;margin:5px 0}
+.nav{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
 </style>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
   getFirestore, collection, addDoc, getDocs,
-  deleteDoc, doc, updateDoc, setDoc, onSnapshot
+  doc, updateDoc, setDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 import {
@@ -26,14 +27,13 @@ import {
   signInWithPopup, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// 🔥 Firebase Config (تبعك)
+// 🔥 CONFIG
 const firebaseConfig = {
   apiKey: "...",
   authDomain: "layt2h-system.firebaseapp.com",
   projectId: "layt2h-system"
 };
 
-// INIT
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -41,17 +41,14 @@ const provider = new GoogleAuthProvider();
 
 let user=null;
 
-// ================= STATE =================
-let state={
-  stock:[],
-  bills:[],
-  cash:0
-};
+// STATE
+let state={ stock:[], bills:[], cash:0 };
+let cart=[];
 
-// ================= AUTH =================
+// AUTH
 window.login = async()=>{
   const res = await signInWithPopup(auth, provider);
-  user = res.user;
+  user=res.user;
 };
 
 onAuthStateChanged(auth,(u)=>{
@@ -62,40 +59,36 @@ onAuthStateChanged(auth,(u)=>{
   }
 });
 
-// ================= DB =================
-const col = (name)=>collection(db,"users",user.uid,name);
+// DB
+const col = (n)=>collection(db,"users",user.uid,n);
 const systemRef = ()=>doc(db,"users",user.uid,"system","main");
 
-// ================= LOAD =================
+// LOAD
 async function loadAll(){
-  await Promise.all([
-    load("stock"),
-    load("bills")
-  ]);
+  await Promise.all([load("stock"),load("bills")]);
   render();
 }
-
 async function load(name){
   const snap = await getDocs(col(name));
   state[name]=snap.docs.map(d=>({id:d.id,...d.data()}));
 }
 
-// ================= CASH REALTIME =================
+// CASH
 function listenCash(){
-  onSnapshot(systemRef(), (docSnap)=>{
-    if(docSnap.exists()){
-      state.cash = docSnap.data().cash || 0;
+  onSnapshot(systemRef(),(d)=>{
+    if(d.exists()){
+      state.cash=d.data().cash||0;
       render();
     }
   });
 }
 
-// ================= STOCK =================
-window.addStock = async()=>{
-  const name = stockName.value;
-  const qty = Number(stockQty.value);
-  const cost = Number(stockCost.value);
-  const price = Number(stockPrice.value);
+// STOCK
+window.addStock=async()=>{
+  const name=stockName.value;
+  const qty=+stockQty.value;
+  const cost=+stockCost.value;
+  const price=+stockPrice.value;
 
   if(!name) return alert("❌ ناقص");
 
@@ -103,16 +96,13 @@ window.addStock = async()=>{
   load("stock").then(render);
 };
 
-// ================= CART =================
-let cart=[];
-
-window.addToCart = ()=>{
-  const id = stockSelect.value;
-  const item = state.stock.find(i=>i.id===id);
-
+// CART
+window.addToCart=()=>{
+  const id=stockSelect.value;
+  const item=state.stock.find(i=>i.id===id);
   if(!item || item.qty<=0) return alert("❌ نفذ");
 
-  cart.push({...item, qtyBuy:1});
+  cart.push({...item,qtyBuy:1});
   renderCart();
 };
 
@@ -120,122 +110,136 @@ function renderCart(){
   cartBox.innerHTML="";
   cart.forEach((i,idx)=>{
     cartBox.innerHTML+=`
-      <div class="card">
-        ${i.name} - ${i.price}
-        <button onclick="removeItem(${idx})">❌</button>
-      </div>
-    `;
+    <div class="card">
+      ${i.name} | ${i.price}
+      <input type="number" value="${i.qtyBuy}" onchange="updateQty(${idx},this.value)">
+      <button onclick="removeItem(${idx})">❌</button>
+    </div>`;
   });
 }
 
-window.removeItem = (i)=>{
+window.updateQty=(i,v)=>{
+  cart[i].qtyBuy=+v;
+};
+
+window.removeItem=(i)=>{
   cart.splice(i,1);
   renderCart();
 };
 
-// ================= SAVE BILL =================
-window.saveBill = async()=>{
+// SAVE BILL
+window.saveBill=async()=>{
   if(cart.length===0) return alert("❌ فاضي");
 
-  let total=0;
-  let profit=0;
+  let total=0, profit=0;
 
   for(const i of cart){
-    total += i.price * i.qtyBuy;
-    profit += (i.price - i.cost) * i.qtyBuy;
+    total+=i.price*i.qtyBuy;
+    profit+=(i.price-i.cost)*i.qtyBuy;
 
     await updateDoc(doc(db,"users",user.uid,"stock",i.id),{
-      qty: i.qty - i.qtyBuy
+      qty:i.qty-i.qtyBuy
     });
   }
 
   await addDoc(col("bills"),{
-    items: cart,
-    total,
-    profit,
-    date: new Date().toISOString()
+    items:cart,total,profit,date:new Date().toISOString()
   });
 
-  state.cash += total;
-  await setDoc(systemRef(), {cash: state.cash});
+  state.cash+=total;
+  await setDoc(systemRef(),{cash:state.cash});
 
   cart=[];
   loadAll();
 };
 
-// ================= DASH =================
+// DASH
 function calc(){
-  const sales = state.bills.reduce((a,b)=>a+b.total,0);
-  const profit = state.bills.reduce((a,b)=>a+b.profit,0);
-  return {sales,profit};
+  return {
+    sales: state.bills.reduce((a,b)=>a+b.total,0),
+    profit: state.bills.reduce((a,b)=>a+b.profit,0)
+  };
 }
 
-// ================= UI =================
+// UI
 function render(){
-  const d = calc();
-
+  const d=calc();
   dash.innerHTML=`
-    💰 المبيعات: ${d.sales}<br>
-    🧠 الربح: ${d.profit}<br>
-    💵 الصندوق: ${state.cash}
+    💰 ${d.sales} | 🧠 ${d.profit} | 💵 ${state.cash}
   `;
 
   stockSelect.innerHTML="";
   state.stock.forEach(s=>{
     stockSelect.innerHTML+=`
-      <option value="${s.id}">
-        ${s.name} (${s.qty})
-      </option>`;
+    <option value="${s.id}">
+      ${s.name} (${s.qty})
+    </option>`;
+  });
+
+  stockList.innerHTML="";
+  state.stock.forEach(s=>{
+    stockList.innerHTML+=`
+    <div class="card">
+      ${s.name} | كمية: ${s.qty} | بيع: ${s.price}
+    </div>`;
   });
 
   billsBox.innerHTML="";
   state.bills.forEach(b=>{
     billsBox.innerHTML+=`
-      <div class="card">
-        💰 ${b.total} | 🧠 ${b.profit}
-      </div>`;
+    <div class="card">
+      💰 ${b.total} | 🧠 ${b.profit}
+    </div>`;
   });
 }
 
+// TABS
+window.showTab=(id)=>{
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+};
 </script>
 </head>
 
 <body>
 
-<h2>🔥 نظام الليث PRO MAX FINAL</h2>
-
+<h2>🔥 نظام الليث PRO APP</h2>
 <button onclick="login()">تسجيل دخول Google</button>
 
-<h3>📊 Dashboard</h3>
-<div id="dash"></div>
-
-<hr>
-
-<div class="grid">
-
-<div>
-<h3>📦 مخزون</h3>
-<input id="stockName" placeholder="اسم">
-<input id="stockQty" type="number" placeholder="كمية">
-<input id="stockCost" type="number" placeholder="تكلفة">
-<input id="stockPrice" type="number" placeholder="سعر بيع">
-<button onclick="addStock()">إضافة</button>
+<div class="nav">
+  <button onclick="showTab('dashTab')">📊</button>
+  <button onclick="showTab('stockTab')">📦</button>
+  <button onclick="showTab('billTab')">🧾</button>
+  <button onclick="showTab('billsTab')">📄</button>
 </div>
 
-<div>
-<h3>🧾 فاتورة</h3>
-<select id="stockSelect"></select>
-<button onclick="addToCart()">➕</button>
-
-<div id="cartBox"></div>
-
-<button onclick="saveBill()">💾 حفظ الفاتورة</button>
+<div id="dashTab" class="tab active">
+  <h3>Dashboard</h3>
+  <div id="dash"></div>
 </div>
 
+<div id="stockTab" class="tab">
+  <h3>مخزون</h3>
+  <input id="stockName" placeholder="اسم">
+  <input id="stockQty" type="number" placeholder="كمية">
+  <input id="stockCost" type="number" placeholder="تكلفة">
+  <input id="stockPrice" type="number" placeholder="بيع">
+  <button onclick="addStock()">إضافة</button>
+  <div id="stockList"></div>
 </div>
 
-<h3>📄 الفواتير</h3>
-<div id="billsBox"></div>
+<div id="billTab" class="tab">
+  <h3>فاتورة</h3>
+  <select id="stockSelect"></select>
+  <button onclick="addToCart()">➕</button>
+  <div id="cartBox"></div>
+  <button onclick="saveBill()">💾 حفظ</button>
+</div>
+
+<div id="billsTab" class="tab">
+  <h3>الفواتير</h3>
+  <div id="billsBox"></div>
+</div>
 
 </body>
 </html>
